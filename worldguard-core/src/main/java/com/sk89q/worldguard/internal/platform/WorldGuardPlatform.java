@@ -19,6 +19,7 @@
 
 package com.sk89q.worldguard.internal.platform;
 
+import com.sk89q.worldedit.entity.Entity;
 import com.sk89q.worldedit.util.formatting.text.TextComponent;
 import com.sk89q.worldedit.util.report.ReportList;
 import com.sk89q.worldedit.world.World;
@@ -34,6 +35,8 @@ import com.sk89q.worldguard.util.profile.resolver.ProfileService;
 
 import javax.annotation.Nullable;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
 
 /**
  * A platform for implementing.
@@ -169,5 +172,27 @@ public interface WorldGuardPlatform {
     @Nullable
     default ProtectedRegion getSpawnProtection(World world) {
         return null;
+    }
+
+    /**
+     * Remove every entity in the given world that matches the predicate.
+     *
+     * <p>Platforms where entities are owned by different threads may test and
+     * remove each entity later, on the thread that owns it, so the predicate
+     * must be safe to call from any of those threads.</p>
+     *
+     * @param world the world
+     * @param predicate the entities to remove
+     * @return a future that completes with the number of entities removed
+     */
+    default CompletableFuture<Integer> removeEntities(World world, Predicate<Entity> predicate) {
+        int removed = 0;
+        for (Entity entity : world.getEntities()) {
+            if (predicate.test(entity)) {
+                entity.remove();
+                removed++;
+            }
+        }
+        return CompletableFuture.completedFuture(removed);
     }
 }

@@ -43,7 +43,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
@@ -111,19 +110,12 @@ public class WorldGuardPlayerListener extends AbstractListener {
             player.sendMessage(ChatColor.YELLOW
                     + "Intensive server activity has been HALTED.");
 
-            int removed = 0;
-
-            for (Entity entity : world.getEntities()) {
-                if (Entities.isIntensiveEntity(BukkitAdapter.adapt(entity))) {
-                    entity.remove();
-                    removed++;
-                }
-            }
-
-            if (removed > 10) {
-                log.info("Halt-Act: " + removed + " entities (>10) auto-removed from "
-                        + player.getWorld());
-            }
+            WorldGuard.getInstance().getPlatform().removeEntities(BukkitAdapter.adapt(world), Entities::isIntensiveEntity)
+                    .thenAccept(removed -> {
+                        if (removed > 10) {
+                            log.info("Halt-Act: " + removed + " entities (>10) auto-removed from " + world);
+                        }
+                    });
         }
 
         if (wcfg.fireSpreadDisableToggle) {

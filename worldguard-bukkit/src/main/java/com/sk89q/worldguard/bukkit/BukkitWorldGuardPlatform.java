@@ -33,6 +33,7 @@ import com.sk89q.worldguard.protection.regions.ProtectedCuboidRegion;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.util.profile.resolver.PaperPlayerService;
 import com.sk89q.worldguard.bukkit.protection.events.flags.FlagContextCreateEvent;
+import com.sk89q.worldguard.bukkit.scheduler.WorldGuardScheduler;
 import com.sk89q.worldguard.bukkit.session.BukkitSessionManager;
 import com.sk89q.worldguard.bukkit.util.report.DatapackReport;
 import com.sk89q.worldguard.bukkit.util.report.PerformanceReport;
@@ -55,6 +56,7 @@ import com.sk89q.worldguard.util.profile.resolver.HttpRepositoryService;
 import com.sk89q.worldguard.util.profile.resolver.ProfileService;
 import io.papermc.lib.PaperLib;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.permissions.Permissible;
@@ -64,6 +66,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class BukkitWorldGuardPlatform implements WorldGuardPlatform {
@@ -273,5 +278,40 @@ public class BukkitWorldGuardPlatform implements WorldGuardPlatform {
             }
         }
         return null;
+    }
+
+    @Override
+    public CompletableFuture<Integer> removeEntities(World world, Predicate<com.sk89q.worldedit.entity.Entity> predicate) {
+        WorldGuardScheduler scheduler = WorldGuardPlugin.inst().getWorldGuardScheduler();
+        if (!scheduler.isRegionThreaded()) {
+            return WorldGuardPlatform.super.removeEntities(world, predicate);
+        }
+
+        // Each entity may belong to a different region, so test and remove it on its own thread.
+        List<Entity> entities = BukkitAdapter.adapt(world).getEntities();
+        if (entities.isEmpty()) {
+            return CompletableFuture.completedFuture(0);
+        }
+        CompletableFuture<Integer> result = new CompletableFuture<>();
+        AtomicInteger removed = new AtomicInteger();
+        AtomicInteger pending = new AtomicInteger(entities.size());
+        Runnable done = () -> {
+            if (pending.decrementAndGet() == 0) {
+                result.complete(removed.get());
+            }
+        };
+        for (Entity entity : entities) {
+            scheduler.runAtEntity(entity, () -> {
+                try {
+                    if (predicate.test(BukkitAdapter.adapt(entity))) {
+                        entity.remove();
+                        removed.incrementAndGet();
+                    }
+                } finally {
+                    done.run();
+                }
+            }, done);
+        }
+        return result;
     }
 }
