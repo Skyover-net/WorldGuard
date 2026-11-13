@@ -60,6 +60,9 @@ import com.sk89q.worldguard.bukkit.listener.WorldGuardVehicleListener;
 import com.sk89q.worldguard.bukkit.listener.WorldGuardWeatherListener;
 import com.sk89q.worldguard.bukkit.listener.WorldGuardWorldListener;
 import com.sk89q.worldguard.bukkit.listener.WorldRulesListener;
+import com.sk89q.worldguard.bukkit.scheduler.BukkitWorldGuardScheduler;
+import com.sk89q.worldguard.bukkit.scheduler.FoliaWorldGuardScheduler;
+import com.sk89q.worldguard.bukkit.scheduler.WorldGuardScheduler;
 import com.sk89q.worldguard.bukkit.session.BukkitSessionManager;
 import com.sk89q.worldguard.bukkit.util.ClassSourceValidator;
 import com.sk89q.worldguard.bukkit.util.Entities;
@@ -99,7 +102,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -170,16 +172,7 @@ public class WorldGuardPlugin extends JavaPlugin {
             reg.register(GeneralCommands.class);
         }
 
-        if (this.isFolia()) {
-            getServer().getGlobalRegionScheduler().runAtFixedRate(this, new Consumer() {
-                @Override
-                public void accept(Object ignored) {
-                    sessionManager.run();
-                }
-            }, BukkitSessionManager.RUN_DELAY, BukkitSessionManager.RUN_DELAY);
-        } else {
-            getServer().getScheduler().scheduleSyncRepeatingTask(this, sessionManager, BukkitSessionManager.RUN_DELAY, BukkitSessionManager.RUN_DELAY);
-        }
+        getWorldGuardScheduler().runGlobalTimer(sessionManager, BukkitSessionManager.RUN_DELAY, BukkitSessionManager.RUN_DELAY);
 
         // Register events
         getServer().getPluginManager().registerEvents(sessionManager, this);
@@ -220,23 +213,8 @@ public class WorldGuardPlugin extends JavaPlugin {
         }
         worldListener.registerEvents();
 
-        if (this.isFolia()) {
-            for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-                player.getScheduler().run(this, new Consumer() {
-                    @Override
-                    public void accept(Object ignored) {
-                        ProcessPlayerEvent event = new ProcessPlayerEvent(player);
-                        Events.fire(event);
-                    }
-                }, null);
-            }
-        } else {
-            Bukkit.getScheduler().runTask(this, () -> {
-                for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-                    ProcessPlayerEvent event = new ProcessPlayerEvent(player);
-                    Events.fire(event);
-                }
-            });
+        for (Player player : Bukkit.getServer().getOnlinePlayers()) {
+            getWorldGuardScheduler().runAtEntity(player, () -> Events.fire(new ProcessPlayerEvent(player)), null);
         }
 
         ((SimpleFlagRegistry) WorldGuard.getInstance().getFlagRegistry()).setInitialized(true);
@@ -292,12 +270,7 @@ public class WorldGuardPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         WorldGuard.getInstance().disable();
-        if (this.isFolia()) {
-            this.getServer().getGlobalRegionScheduler().cancelTasks(this);
-            this.getServer().getAsyncScheduler().cancelTasks(this);
-        } else {
-            this.getServer().getScheduler().cancelTasks(this);
-        }
+        getWorldGuardScheduler().cancelAllTasks();
     }
 
     @Override
@@ -559,19 +532,50 @@ public class WorldGuardPlugin extends JavaPlugin {
 
     private final LazyReference<Boolean> folia = LazyReference.from(() -> {
         try {
-            return getWorldEdit().isFolia(); // Delegate check to WorldEdit
+            if (getWorldEdit().isFolia()) { // Delegate check to WorldEdit
+                return true;
+            }
         } catch (NoSuchMethodError _) {
             // Ignore, this likely means an outdated version.
             LOGGER.warn("Failed to check if server is running Folia, as WorldEdit's Folia support is missing.");
         } catch (Throwable t) {
-            // Unknown error, log it and return false.
+            // Unknown error, log it and fall back to the class check.
             LOGGER.warn("Failed to check if server is running Folia", t);
         }
-        return false;
+        // Folia forks (such as Canvas) may not declare brand compatibility with Folia,
+        // but every region-threaded server ships the regionised server class.
+        return hasRegionizedServer();
     });
 
+    private static boolean hasRegionizedServer() {
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            return true;
+        } catch (ClassNotFoundException _) {
+            return false;
+        }
+    }
+
+    private final LazyReference<WorldGuardScheduler> scheduler = LazyReference.from(() ->
+            isFolia() ? new FoliaWorldGuardScheduler(this) : new BukkitWorldGuardScheduler(this));
+
+    /**
+     * Check whether the server uses region threading (Folia or a fork such as Canvas).
+     *
+     * @return true if region threaded
+     */
     public boolean isFolia() {
         return folia.getValue();
+    }
+
+    /**
+     * Get the scheduler that runs work on the thread that owns the affected
+     * game state. On servers without region threading, this is the main thread.
+     *
+     * @return the scheduler
+     */
+    public WorldGuardScheduler getWorldGuardScheduler() {
+        return scheduler.getValue();
     }
 
 }

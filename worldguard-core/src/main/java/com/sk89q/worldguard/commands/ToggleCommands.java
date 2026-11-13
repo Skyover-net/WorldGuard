@@ -24,7 +24,6 @@ import com.sk89q.minecraft.util.commands.CommandContext;
 import com.sk89q.minecraft.util.commands.CommandException;
 import com.sk89q.minecraft.util.commands.CommandPermissions;
 import com.sk89q.worldedit.WorldEdit;
-import com.sk89q.worldedit.entity.Entity;
 import com.sk89q.worldedit.extension.platform.Actor;
 import com.sk89q.worldedit.extension.platform.Capability;
 import com.sk89q.worldedit.util.formatting.component.CodeFormat;
@@ -152,19 +151,12 @@ public class ToggleCommands {
                 }
 
                 for (World world : WorldEdit.getInstance().getPlatformManager().queryCapability(Capability.GAME_HOOKS).getWorlds()) {
-                    int removed = 0;
-
-                    for (Entity entity : world.getEntities()) {
-                        if (Entities.isIntensiveEntity(entity)) {
-                            entity.remove();
-                            removed++;
+                    worldGuard.getPlatform().removeEntities(world, Entities::isIntensiveEntity).thenAccept(removed -> {
+                        if (removed > 10) {
+                            sender.printRaw("" + removed + " entities (>10) auto-removed from "
+                                    + world.getName());
                         }
-                    }
-
-                    if (removed > 10) {
-                        sender.printRaw("" + removed + " entities (>10) auto-removed from "
-                                + world.getName());
-                    }
+                    });
                 }
             } else {
                 if (!args.hasFlag('s')) {

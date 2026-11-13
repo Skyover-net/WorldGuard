@@ -25,6 +25,7 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.bukkit.BukkitPlayer;
 import com.sk89q.worldguard.bukkit.WorldGuardPlugin;
 import com.sk89q.worldguard.bukkit.event.player.ProcessPlayerEvent;
+import com.sk89q.worldguard.bukkit.scheduler.WorldGuardScheduler;
 import com.sk89q.worldguard.bukkit.util.Entities;
 import com.sk89q.worldguard.session.AbstractSessionManager;
 import com.sk89q.worldguard.session.Session;
@@ -32,8 +33,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-
-import java.util.function.Consumer;
 
 
 /**
@@ -47,26 +46,16 @@ public class BukkitSessionManager extends AbstractSessionManager implements Runn
      * "last position," "last state," etc. information for all players.
      */
     @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
     public void resetAllStates() {
+        WorldGuardScheduler scheduler = WorldGuardPlugin.inst().getWorldGuardScheduler();
         for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-            Runnable task = () -> {
+            scheduler.executeAtEntity(player, () -> {
                 BukkitPlayer bukkitPlayer = new BukkitPlayer(WorldGuardPlugin.inst(), player);
                 Session session = getIfPresent(bukkitPlayer);
                 if (session != null) {
                     session.resetState(bukkitPlayer);
                 }
-            };
-            if (WorldGuardPlugin.inst().isFolia()) {
-                player.getScheduler().run(WorldGuardPlugin.inst(), new Consumer() {
-                    @Override
-                    public void accept(Object ignored) {
-                        task.run();
-                    }
-                }, null);
-            } else {
-                task.run();
-            }
+            });
         }
     }
 
@@ -83,23 +72,15 @@ public class BukkitSessionManager extends AbstractSessionManager implements Runn
     }
 
     @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
     public void run() {
+        // On region-threaded servers this runs on the global region, so each
+        // player is ticked on the region that owns them.
+        WorldGuardScheduler scheduler = WorldGuardPlugin.inst().getWorldGuardScheduler();
         for (Player player : Bukkit.getServer().getOnlinePlayers()) {
-            Runnable task = () -> {
+            scheduler.executeAtEntity(player, () -> {
                 LocalPlayer localPlayer = WorldGuardPlugin.inst().wrapPlayer(player);
                 get(localPlayer).tick(localPlayer);
-            };
-            if (WorldGuardPlugin.inst().isFolia()) {
-                player.getScheduler().run(WorldGuardPlugin.inst(), new Consumer() {
-                    @Override
-                    public void accept(Object ignored) {
-                        task.run();
-                    }
-                }, null);
-            } else {
-                task.run();
-            }
+            });
         }
     }
 

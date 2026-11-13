@@ -107,6 +107,39 @@ public class BukkitDebugHandler implements DebugHandler {
         }
     }
 
+    @FunctionalInterface
+    private interface DebugTest {
+        void run() throws CommandException;
+    }
+
+    /**
+     * Run a test on the thread that owns the player the trace starts from.
+     *
+     * <p>When called from another thread (such as the console, or a player in
+     * another Folia region), the test is scheduled and any error is sent to
+     * the sender instead of being thrown.</p>
+     *
+     * @param sender The message sender
+     * @param target The provided target
+     * @param fromTarget Whether the source should be the target
+     * @param test The test
+     * @throws CommandException Thrown if a condition is not met
+     */
+    private void runTest(CommandSender sender, Player target, boolean fromTarget, DebugTest test) throws CommandException {
+        Player source = getSource(sender, target, fromTarget);
+        if (plugin.getWorldGuardScheduler().isOwnedByCurrentRegion(source)) {
+            test.run();
+            return;
+        }
+        plugin.getWorldGuardScheduler().runAtEntity(source, () -> {
+            try {
+                test.run();
+            } catch (CommandException e) {
+                sender.sendMessage(ChatColor.RED + e.getMessage());
+            }
+        }, null);
+    }
+
     /**
      * Get the source of the test.
      *
@@ -190,10 +223,12 @@ public class BukkitDebugHandler implements DebugHandler {
         CommandSender bukkitSender = plugin.unwrapActor(sender);
         Player bukkitTarget = BukkitAdapter.adapt(target);
 
-        Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
-        sender.print(TextComponent.of("Testing BLOCK BREAK at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
-        LoggingBlockBreakEvent event = new LoggingBlockBreakEvent(block, bukkitTarget);
-        testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        runTest(bukkitSender, bukkitTarget, fromTarget, () -> {
+            Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
+            sender.print(TextComponent.of("Testing BLOCK BREAK at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
+            LoggingBlockBreakEvent event = new LoggingBlockBreakEvent(block, bukkitTarget);
+            testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        });
     }
 
     @Override
@@ -201,10 +236,12 @@ public class BukkitDebugHandler implements DebugHandler {
         CommandSender bukkitSender = plugin.unwrapActor(sender);
         Player bukkitTarget = BukkitAdapter.adapt(target);
 
-        Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
-        sender.print(TextComponent.of("Testing BLOCK PLACE at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
-        LoggingBlockPlaceEvent event = new LoggingBlockPlaceEvent(block, block.getState(), block.getRelative(BlockFace.DOWN), bukkitTarget.getItemInHand(), bukkitTarget, true);
-        testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        runTest(bukkitSender, bukkitTarget, fromTarget, () -> {
+            Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
+            sender.print(TextComponent.of("Testing BLOCK PLACE at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
+            LoggingBlockPlaceEvent event = new LoggingBlockPlaceEvent(block, block.getState(), block.getRelative(BlockFace.DOWN), bukkitTarget.getItemInHand(), bukkitTarget, true);
+            testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        });
     }
 
     @Override
@@ -212,19 +249,23 @@ public class BukkitDebugHandler implements DebugHandler {
         CommandSender bukkitSender = plugin.unwrapActor(sender);
         Player bukkitTarget = BukkitAdapter.adapt(target);
 
-        Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
-        sender.print(TextComponent.of("Testing BLOCK INTERACT at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
-        LoggingPlayerInteractEvent event = new LoggingPlayerInteractEvent(bukkitTarget, Action.RIGHT_CLICK_BLOCK, bukkitTarget.getItemInHand(), block, BlockFace.SOUTH);
-        testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        runTest(bukkitSender, bukkitTarget, fromTarget, () -> {
+            Block block = traceBlock(bukkitSender, bukkitTarget, fromTarget);
+            sender.print(TextComponent.of("Testing BLOCK INTERACT at ", TextColor.AQUA).append(TextComponent.of(block.toString(), TextColor.DARK_AQUA)));
+            LoggingPlayerInteractEvent event = new LoggingPlayerInteractEvent(bukkitTarget, Action.RIGHT_CLICK_BLOCK, bukkitTarget.getItemInHand(), block, BlockFace.SOUTH);
+            testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        });
     }
 
     @Override
     public void testDamage(Actor sender, LocalPlayer target, boolean fromTarget, boolean stackTraceMode) throws CommandException {
         CommandSender bukkitSender = plugin.unwrapActor(sender);
         Player bukkitTarget = BukkitAdapter.adapt(target);
-        Entity entity = traceEntity(bukkitSender, bukkitTarget, fromTarget);
-        sender.print(TextComponent.of("Testing ENTITY DAMAGE at ", TextColor.AQUA).append(TextComponent.of(entity.toString(), TextColor.DARK_AQUA)));
-        LoggingEntityDamageByEntityEvent event = new LoggingEntityDamageByEntityEvent(bukkitTarget, entity, EntityDamageEvent.DamageCause.ENTITY_ATTACK, 1);
-        testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        runTest(bukkitSender, bukkitTarget, fromTarget, () -> {
+            Entity entity = traceEntity(bukkitSender, bukkitTarget, fromTarget);
+            sender.print(TextComponent.of("Testing ENTITY DAMAGE at ", TextColor.AQUA).append(TextComponent.of(entity.toString(), TextColor.DARK_AQUA)));
+            LoggingEntityDamageByEntityEvent event = new LoggingEntityDamageByEntityEvent(bukkitTarget, entity, EntityDamageEvent.DamageCause.ENTITY_ATTACK, 1);
+            testEvent(bukkitSender, bukkitTarget, event, stackTraceMode);
+        });
     }
 }

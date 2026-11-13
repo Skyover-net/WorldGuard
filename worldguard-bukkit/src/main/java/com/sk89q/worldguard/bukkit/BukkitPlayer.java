@@ -21,16 +21,18 @@ package com.sk89q.worldguard.bukkit;
 
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.util.Location;
+import com.sk89q.worldedit.world.gamemode.GameMode;
 import com.sk89q.worldedit.world.weather.WeatherType;
 import com.sk89q.worldedit.world.weather.WeatherTypes;
 import com.sk89q.worldguard.LocalPlayer;
 import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.bukkit.util.PaperInterop;
 import com.sk89q.worldguard.util.MessagingUtil;
-import io.papermc.lib.PaperLib;
 import org.bukkit.BanList.Type;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+
+import java.util.concurrent.CompletableFuture;
 
 public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implements LocalPlayer {
 
@@ -46,6 +48,19 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
         super(player);
         this.plugin = plugin;
         this.silenced = silenced;
+    }
+
+    /**
+     * Run a change to the player's state on the thread that owns the player.
+     *
+     * <p>This runs right away when already on that thread (always the case
+     * for event handlers and session ticks). Otherwise, such as when a command
+     * targets a player in another Folia region, the change is scheduled.</p>
+     *
+     * @param task the change
+     */
+    private void onPlayerThread(Runnable task) {
+        plugin.getWorldGuardScheduler().executeAtEntity(getPlayer(), task);
     }
 
     @Override
@@ -65,7 +80,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
     @Override
     public void kick(String msg) {
         if (!silenced) {
-            getPlayer().kickPlayer(msg);
+            onPlayerThread(() -> getPlayer().kickPlayer(msg));
         }
     }
 
@@ -73,7 +88,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
     public void ban(String msg) {
         if (!silenced) {
             Bukkit.getBanList(Type.NAME).addBan(getName(), null, null, null);
-            getPlayer().kickPlayer(msg);
+            onPlayerThread(() -> getPlayer().kickPlayer(msg));
         }
     }
 
@@ -84,7 +99,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setHealth(double health) {
-        getPlayer().setHealth(health);
+        onPlayerThread(() -> getPlayer().setHealth(health));
     }
 
     @Override
@@ -99,7 +114,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setFoodLevel(double foodLevel) {
-        getPlayer().setFoodLevel((int) foodLevel);
+        onPlayerThread(() -> getPlayer().setFoodLevel((int) foodLevel));
     }
 
     @Override
@@ -109,7 +124,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setSaturation(double saturation) {
-        getPlayer().setSaturation((float) saturation);
+        onPlayerThread(() -> getPlayer().setSaturation((float) saturation));
     }
 
     @Override
@@ -119,7 +134,7 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setExhaustion(float exhaustion) {
-        getPlayer().setExhaustion(exhaustion);
+        onPlayerThread(() -> getPlayer().setExhaustion(exhaustion));
     }
 
     @Override
@@ -130,12 +145,13 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setPlayerWeather(WeatherType weather) {
-        getPlayer().setPlayerWeather(weather == WeatherTypes.CLEAR ? org.bukkit.WeatherType.CLEAR : org.bukkit.WeatherType.DOWNFALL);
+        org.bukkit.WeatherType bukkitWeather = weather == WeatherTypes.CLEAR ? org.bukkit.WeatherType.CLEAR : org.bukkit.WeatherType.DOWNFALL;
+        onPlayerThread(() -> getPlayer().setPlayerWeather(bukkitWeather));
     }
 
     @Override
     public void resetPlayerWeather() {
-        getPlayer().resetPlayerWeather();
+        onPlayerThread(() -> getPlayer().resetPlayerWeather());
     }
 
     @Override
@@ -150,12 +166,12 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setPlayerTime(long time, boolean relative) {
-        getPlayer().setPlayerTime(time, relative);
+        onPlayerThread(() -> getPlayer().setPlayerTime(time, relative));
     }
 
     @Override
     public void resetPlayerTime() {
-        getPlayer().resetPlayerTime();
+        onPlayerThread(() -> getPlayer().resetPlayerTime());
     }
 
     @Override
@@ -165,12 +181,18 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void setFireTicks(int fireTicks) {
-        getPlayer().setFireTicks(fireTicks);
+        onPlayerThread(() -> getPlayer().setFireTicks(fireTicks));
     }
 
     @Override
     public void setCompassTarget(Location location) {
-        getPlayer().setCompassTarget(BukkitAdapter.adapt(location));
+        org.bukkit.Location target = BukkitAdapter.adapt(location);
+        onPlayerThread(() -> getPlayer().setCompassTarget(target));
+    }
+
+    @Override
+    public void setGameMode(GameMode gameMode) {
+        onPlayerThread(() -> super.setGameMode(gameMode));
     }
 
     @Override
@@ -184,23 +206,26 @@ public class BukkitPlayer extends com.sk89q.worldedit.bukkit.BukkitPlayer implem
 
     @Override
     public void resetFallDistance() {
-        getPlayer().setFallDistance(0);
+        onPlayerThread(() -> getPlayer().setFallDistance(0));
     }
 
     @Override
     public void teleport(Location location, String successMessage, String failMessage) {
-        PaperInterop.teleportAsync(getPlayer(), BukkitAdapter.adapt(location))
-                .thenApply(success -> {
-                    if (success) {
-                        // The success message can be cleared via flag
-                        if (!successMessage.isEmpty()) {
-                            MessagingUtil.sendStringToChat(this, successMessage);
-                        }
-                    } else {
-                        printError(failMessage);
-                    }
-                    return success;
-                });
+        org.bukkit.Location destination = BukkitAdapter.adapt(location);
+        CompletableFuture<Boolean> result = plugin.getWorldGuardScheduler().isRegionThreaded()
+                ? plugin.getWorldGuardScheduler().teleport(getPlayer(), destination)
+                : PaperInterop.teleportAsync(getPlayer(), destination);
+        result.thenApply(success -> {
+            if (success) {
+                // The success message can be cleared via flag
+                if (!successMessage.isEmpty()) {
+                    MessagingUtil.sendStringToChat(this, successMessage);
+                }
+            } else {
+                printError(failMessage);
+            }
+            return success;
+        });
     }
 
     @Override

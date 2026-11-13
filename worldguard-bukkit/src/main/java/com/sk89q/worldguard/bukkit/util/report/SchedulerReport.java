@@ -53,7 +53,9 @@ public class SchedulerReport extends DataReport {
     public SchedulerReport() {
         super("Scheduler");
         if (WorldGuardPlugin.inst().isFolia()) {
-            return; // Todo Add support Schedulers
+            // Folia's region, entity and async schedulers do not expose their pending tasks
+            append("Scheduler", "Region-threaded (pending tasks cannot be listed)");
+            return;
         }
 
         List<BukkitTask> tasks = Bukkit.getServer().getScheduler().getPendingTasks();
